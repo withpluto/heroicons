@@ -5,6 +5,7 @@ const rimraf = promisify(require('rimraf'))
 const svgr = require('@svgr/core').default
 const babel = require('@babel/core')
 const { compile: compileVue } = require('@vue/compiler-dom')
+const { compile } = require('svelte/compiler')
 const { dirname } = require('path')
 
 let transform = {
@@ -44,6 +45,20 @@ let transform = {
         }
       )
       .replace('export function render', 'module.exports = function render')
+  },
+  svelte: (svg, componentName, format) => {
+    let { js } = compile(svg, {
+      format: 'cjs',
+      name: componentName,
+    })
+
+    if (format === 'esm') {
+      return js.code.replace('export function render', 'export default function render')
+    }
+
+    return js.code
+      .replace('export function render', 'module.exports = function render')
+      .replace('import {', 'const {')
   },
 }
 
