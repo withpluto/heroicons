@@ -5,7 +5,7 @@ const rimraf = promisify(require('rimraf'))
 const svgr = require('@svgr/core').default
 const babel = require('@babel/core')
 const { compile: compileVue } = require('@vue/compiler-dom')
-const { compile } = require('svelte/compiler')
+const { exec } = require('child_process')
 const { dirname } = require('path')
 
 let transform = {
@@ -45,20 +45,6 @@ let transform = {
         }
       )
       .replace('export function render', 'module.exports = function render')
-  },
-  svelte: (svg, componentName, format) => {
-    let { js } = compile(svg, {
-      format: 'cjs',
-      name: componentName,
-    })
-
-    if (format === 'esm') {
-      return js.code.replace('export function render', 'export default function render')
-    }
-
-    return js.code
-      .replace('export function render', 'module.exports = function render')
-      .replace('import {', 'const {')
   },
 }
 
@@ -179,7 +165,17 @@ async function buildExports(styles) {
   return pkg
 }
 
-async function main(package) {
+async function createPackageJson(package) {
+  let packageJson = JSON.parse(await fs.readFile(`./${package}/package.json`, 'utf8'))
+
+  packageJson.exports = await buildExports(['20/solid', '24/outline', '24/solid'])
+
+  await ensureWriteJson(`./${package}/package.json`, packageJson)
+
+  return console.log(`Finished building ${package} package.`)
+}
+
+async function buildPackage(package) {
   const cjsPackageJson = { module: './esm/index.js', sideEffects: false }
   const esmPackageJson = { type: 'module', sideEffects: false }
 
@@ -206,19 +202,62 @@ async function main(package) {
     ensureWriteJson(`./${package}/24/solid/package.json`, cjsPackageJson),
   ])
 
-  let packageJson = JSON.parse(await fs.readFile(`./${package}/package.json`, 'utf8'))
-
-  packageJson.exports = await buildExports(['20/solid', '24/outline', '24/solid'])
-
-  await ensureWriteJson(`./${package}/package.json`, packageJson)
-
+  await createPackageJson(package)
   return console.log(`Finished building ${package} package.`)
+}
+
+async function sveltifyIcons(style) {
+  const icons = await getIcons(style)
+
+  icons.flatMap(async ({ componentName, svg }) => {
+    // transform foo-bar filename to FooBar.svelte
+    const svelteComponentName = componentName.replace(/-([a-z])/g, g => g[1].toUpperCase()) + '.svelte'
+    await ensureWrite(`./svelte/src/lib/${style}/${svelteComponentName}`, svg)
+  })
+}
+
+async function buildSvelte() {
+  console.log(`Building Svelte package...`)
+
+  await Promise.all([
+    rimraf(`./svelte/src/lib/20/solid/*`),
+    rimraf(`./svelte/src/lib/24/outline/*`),
+    rimraf(`./svelte/src/lib/24/solid/*`),
+  ])
+
+  await Promise.all([
+    sveltifyIcons('20/solid'),
+    sveltifyIcons('24/outline'),
+    sveltifyIcons('24/solid'),
+  ])
+
+  exec('svelte-package', { cwd: './svelte' }, (error, stdout, stderr) => {
+    if (error) {
+      console.error(`error: ${error.message}`)
+      return
+    }
+    if (stderr) {
+      console.error(`stderr: ${stderr}`)
+      return
+    }
+    console.log(`stdout: ${stdout}`)
+  })
+
+  await createPackageJson('svelte')
 }
 
 let [package] = process.argv.slice(2)
 
 if (!package) {
   throw new Error('Please specify a package')
+}
+
+async function main(package) {
+  if (package === 'svelte') {
+    await buildSvelte()
+    return
+  }
+  await buildPackage(package)
 }
 
 main(package)
