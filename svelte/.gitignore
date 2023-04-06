@@ -9,5 +9,5 @@ node_modules
 !.env.example
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
-src/lib/20
-src/lib/24
+#src/lib/20
+#src/lib/24
